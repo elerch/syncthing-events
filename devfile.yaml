@@ -1,0 +1,49 @@
+schemaVersion: 2.2.0
+metadata:
+  name: syncthing-events-handler
+  version: 1.0.0
+  displayName: Syncthing Events Handler
+  description: A Zig application that monitors Syncthing events and executes configured actions
+  language: zig
+  projectType: zig
+
+components:
+  - name: zig-dev
+    container:
+      image: hexpm/elixir:1.15.4-erlang-26.0.2-debian-bullseye-20230612-slim
+      memoryLimit: 2Gi
+      mountSources: true
+      command: ['tail', '-f', '/dev/null']
+      env:
+        - name: ZIG_VERSION
+          value: "0.14.0"
+
+commands:
+  - id: download-zig
+    exec:
+      component: zig-dev
+      commandLine: |
+        curl -L https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz -o zig.tar.xz && \
+        tar xf zig.tar.xz && \
+        mv zig-linux-x86_64-${ZIG_VERSION} /usr/local/zig && \
+        rm zig.tar.xz && \
+        ln -s /usr/local/zig/zig /usr/local/bin/zig
+      workingDir: ${PROJECT_SOURCE}
+
+  - id: build
+    exec:
+      component: zig-dev
+      commandLine: zig build
+      workingDir: ${PROJECT_SOURCE}
+
+  - id: test
+    exec:
+      component: zig-dev
+      commandLine: zig build test
+      workingDir: ${PROJECT_SOURCE}
+
+  - id: run
+    exec:
+      component: zig-dev
+      commandLine: zig build run
+      workingDir: ${PROJECT_SOURCE}
