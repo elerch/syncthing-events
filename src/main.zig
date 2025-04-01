@@ -91,18 +91,32 @@ fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !std.json.Parsed(C
     const content = try file.readToEndAlloc(allocator, max_size);
     defer allocator.free(content);
 
+    return try parseConfig(allocator, content, try detectFileType(path));
+}
+
+const FileType = enum {
+    json,
+    zon,
+    yaml,
+};
+
+fn detectFileType(path: []const u8) !FileType {
     const ext = std.fs.path.extension(path);
-    if (std.mem.eql(u8, ext, ".json")) {
-        return try std.json.parseFromSlice(Config, allocator, content, .{});
-    } else if (std.mem.eql(u8, ext, ".zon")) {
-        // TODO: Implement ZON parsing
-        return error.UnsupportedConfigFormat;
-    } else if (std.mem.eql(u8, ext, ".yaml") or std.mem.eql(u8, ext, ".yml")) {
-        // TODO: Implement YAML parsing
-        return error.UnsupportedConfigFormat;
-    } else {
-        return error.UnsupportedConfigFormat;
-    }
+    if (std.mem.eql(u8, ext, ".json"))
+        return .json;
+    if (std.mem.eql(u8, ext, ".zon"))
+        return .zon;
+    if (std.mem.eql(u8, ext, ".yaml") or std.mem.eql(u8, ext, ".yml"))
+        return .yaml;
+    return error.UnknownFileType;
+}
+
+fn parseConfig(allocator: std.mem.Allocator, content: []const u8, file_type: FileType) !std.json.Parsed(Config) {
+    return switch (file_type) {
+        .json => try std.json.parseFromSlice(Config, allocator, content, .{}),
+        .zon => error.UnsupportedConfigFormat, // TODO: Implement ZON parsing
+        .yaml => error.UnsupportedConfigFormat, // TODO: Implement YAML parsing
+    };
 }
 
 fn printUsage() void {
@@ -148,11 +162,10 @@ test "config loading" {
         \\}
     ;
 
-    try std.fs.cwd().writeFile("test_config.json", config_json);
-    defer std.fs.cwd().deleteFile("test_config.json") catch {};
-
-    const config = try loadConfig(allocator, "test_config.json");
-    defer config.deinit(allocator);
+    // Test code:
+    const parsed_config = try parseConfig(allocator, config_json, .json);
+    defer parsed_config.deinit();
+    const config = parsed_config.value;
 
     try testing.expectEqualStrings("http://test:8384", config.syncthing_url);
     try testing.expectEqual(@as(u32, 3), config.max_retries);

@@ -1,5 +1,4 @@
 const std = @import("std");
-const testing = std.testing;
 const mvzr = @import("mvzr");
 
 pub const Config = struct {
@@ -29,14 +28,11 @@ pub const Watcher = struct {
             .command = try allocator.dupe(u8, command),
             .compiled_pattern = null,
         };
-        watcher.compiled_pattern = try mvzr.Pattern.compile(allocator, path_pattern);
+        watcher.compiled_pattern = mvzr.compile(path_pattern);
         return watcher;
     }
 
     pub fn deinit(self: *Watcher, allocator: std.mem.Allocator) void {
-        if (self.compiled_pattern) |*pattern| {
-            pattern.deinit();
-        }
         allocator.free(self.folder);
         allocator.free(self.path_pattern);
         allocator.free(self.command);
@@ -208,22 +204,18 @@ test "config parsing" {
         \\}
     ;
 
-    var parser = std.json.Parser.init(testing.allocator, false);
-    defer parser.deinit();
+    const parsed = try std.json.parseFromSlice(Config, std.testing.allocator, config_json, .{});
+    defer parsed.deinit();
 
-    var tree = try parser.parse(config_json);
-    defer tree.deinit();
+    const config = parsed.value;
 
-    const config = try std.json.parse(Config, &tree, .{ .allocator = testing.allocator });
-    defer config.deinit(testing.allocator);
-
-    try testing.expectEqualStrings("http://test:8384", config.syncthing_url);
-    try testing.expectEqual(@as(u32, 3), config.max_retries);
-    try testing.expectEqual(@as(u32, 2000), config.retry_delay_ms);
-    try testing.expectEqual(@as(usize, 1), config.watchers.len);
-    try testing.expectEqualStrings("test", config.watchers[0].folder);
-    try testing.expectEqualStrings(".*\\.txt$", config.watchers[0].path_pattern);
-    try testing.expectEqualStrings("echo ${path}", config.watchers[0].command);
+    try std.testing.expectEqualStrings("http://test:8384", config.syncthing_url);
+    try std.testing.expectEqual(@as(u32, 3), config.max_retries);
+    try std.testing.expectEqual(@as(u32, 2000), config.retry_delay_ms);
+    try std.testing.expectEqual(@as(usize, 1), config.watchers.len);
+    try std.testing.expectEqualStrings("test", config.watchers[0].folder);
+    try std.testing.expectEqualStrings(".*\\.txt$", config.watchers[0].path_pattern);
+    try std.testing.expectEqualStrings("echo ${path}", config.watchers[0].command);
 }
 
 test "event parsing" {
@@ -236,19 +228,16 @@ test "event parsing" {
         \\}
     ;
 
-    var parser = std.json.Parser.init(testing.allocator, false);
-    defer parser.deinit();
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, event_json, .{});
+    defer parsed.deinit();
 
-    var tree = try parser.parse(event_json);
-    defer tree.deinit();
+    var event = try SyncthingEvent.fromJson(std.testing.allocator, parsed.value);
+    defer event.deinit(std.testing.allocator);
 
-    var event = try SyncthingEvent.fromJson(testing.allocator, tree.root);
-    defer event.deinit(testing.allocator);
-
-    try testing.expectEqual(@as(i64, 123), event.id);
-    try testing.expectEqualStrings("ItemFinished", event.type);
-    try testing.expectEqualStrings("default", event.folder);
-    try testing.expectEqualStrings("test.txt", event.path);
+    try std.testing.expectEqual(@as(i64, 123), event.id);
+    try std.testing.expectEqualStrings("ItemFinished", event.type);
+    try std.testing.expectEqualStrings("default", event.folder);
+    try std.testing.expectEqualStrings("test.txt", event.path);
 }
 
 test "command variable expansion" {
@@ -260,10 +249,10 @@ test "command variable expansion" {
     };
 
     const command = "convert ${path} -resize 800x600 thumb_${folder}_${type}.jpg";
-    const expanded = try expandCommandVariables(testing.allocator, command, event);
-    defer testing.allocator.free(expanded);
+    const expanded = try expandCommandVariables(std.testing.allocator, command, event);
+    defer std.testing.allocator.free(expanded);
 
-    try testing.expectEqualStrings(
+    try std.testing.expectEqualStrings(
         "convert vacation.jpg -resize 800x600 thumb_photos_ItemFinished.jpg",
         expanded,
     );
@@ -271,15 +260,15 @@ test "command variable expansion" {
 
 test "watcher pattern matching" {
     var watcher = try Watcher.init(
-        testing.allocator,
+        std.testing.allocator,
         "photos",
         ".*\\.jpe?g$",
         "echo ${path}",
     );
-    defer watcher.deinit(testing.allocator);
+    defer watcher.deinit(std.testing.allocator);
 
-    try testing.expect(watcher.matches("photos", "test.jpg"));
-    try testing.expect(watcher.matches("photos", "test.jpeg"));
-    try testing.expect(!watcher.matches("photos", "test.png"));
-    try testing.expect(!watcher.matches("documents", "test.jpg"));
+    try std.testing.expect(watcher.matches("photos", "test.jpg"));
+    try std.testing.expect(watcher.matches("photos", "test.jpeg"));
+    try std.testing.expect(!watcher.matches("photos", "test.png"));
+    try std.testing.expect(!watcher.matches("documents", "test.jpg"));
 }
