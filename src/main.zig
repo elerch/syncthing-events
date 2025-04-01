@@ -15,9 +15,28 @@ pub fn main() !u8 {
 
     const args = try parseArgs(allocator);
 
-    var parsed_config = try loadConfig(allocator, args.config_path);
+    const file = try std.fs.cwd().openFile(args.config_path, .{});
+    defer file.close();
+
+    const max_size = 1024 * 1024; // 1MB max config size
+    const content = try file.readToEndAlloc(allocator, max_size);
+    defer allocator.free(content);
+
+    const parsed_config = try parseConfig(allocator, content, try detectFileType(args.config_path));
     defer parsed_config.deinit();
     var config = parsed_config.value;
+    for (config.watchers) |watcher|
+        std.log.debug("Watching folder {s} for paths matching pattern '{s}'", .{ watcher.folder, watcher.path_pattern });
+
+    const api_key = std.process.getEnvVarOwned(allocator, "ST_EVENTS_AUTH") catch |err|
+        switch (err) {
+            error.EnvironmentVariableNotFound => {
+                std.log.err("ST_EVENTS_AUTH not set. Please set this variable and re-run", .{});
+                return 2;
+            },
+            else => return err,
+        };
+    defer allocator.free(api_key);
 
     if (args.syncthing_url) |url| {
         config.syncthing_url = url;
@@ -26,12 +45,15 @@ pub fn main() !u8 {
     const stdout = std.io.getStdOut().writer();
     try stdout.print("Monitoring Syncthing events at {s}\n", .{config.syncthing_url});
 
+    var last_id: ?i64 = null;
     while (true) {
         var arena_alloc = std.heap.ArenaAllocator.init(allocator);
         defer arena_alloc.deinit();
         const arena = arena_alloc.allocator();
 
-        var poller = try EventPoller.init(arena, config);
+        var poller = try EventPoller.init(arena, api_key, config);
+        defer last_id = poller.last_id;
+        poller.last_id = last_id;
         const events = poller.poll() catch |err| switch (err) {
             error.Unauthorized => {
                 std.log.err("Not authorized to use syncthing. Please set ST_EVENTS_AUTH environment variable and try again", .{});
@@ -50,7 +72,7 @@ pub fn main() !u8 {
         for (events) |event| {
             for (config.watchers) |watcher| {
                 if (watcher.matches(event.folder, event.path)) {
-                    try stdout.print("Match found for {s}/{s}, executing command\n", .{ event.folder, event.path });
+                    try stdout.print("Match found for folder {s}, path {s}, executing command\n\t{s}\n", .{ event.folder, event.path, watcher.command });
                     try lib.executeCommand(allocator, watcher.command, event);
                 }
             }
@@ -91,17 +113,6 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
     return args;
 }
 
-fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !std.json.Parsed(Config) {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-
-    const max_size = 1024 * 1024; // 1MB max config size
-    const content = try file.readToEndAlloc(allocator, max_size);
-    defer allocator.free(content);
-
-    return try parseConfig(allocator, content, try detectFileType(path));
-}
-
 const FileType = enum {
     json,
     zon,
@@ -136,6 +147,9 @@ fn printUsage() void {
         \\  --url <url>      Override Syncthing URL from config
         \\  --help          Show this help message
         \\
+        \\ST_EVENTS_AUTH environment variable must contain the auth token for
+        \\syncthing. This can be found in the syncthing UI by clicking Actions,
+        \\then settings, and copying the API Key variable
     ;
     std.debug.print(usage, .{});
 }

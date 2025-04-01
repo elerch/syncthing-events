@@ -5,14 +5,7 @@ pub const Config = struct {
     syncthing_url: []const u8 = "http://localhost:8384",
     max_retries: usize = std.math.maxInt(usize),
     retry_delay_ms: u32 = 1000,
-    watchers: []Watcher,
-
-    pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
-        for (self.watchers) |*watcher| {
-            watcher.deinit(allocator);
-        }
-        allocator.free(self.watchers);
-    }
+    watchers: []*Watcher,
 };
 
 pub const Watcher = struct {
@@ -21,51 +14,45 @@ pub const Watcher = struct {
     command: []const u8,
     compiled_pattern: ?mvzr.Regex = null,
 
-    pub fn init(allocator: std.mem.Allocator, folder: []const u8, path_pattern: []const u8, command: []const u8) !Watcher {
-        var watcher = Watcher{
-            .folder = try allocator.dupe(u8, folder),
-            .path_pattern = try allocator.dupe(u8, path_pattern),
-            .command = try allocator.dupe(u8, command),
-            .compiled_pattern = null,
-        };
-        watcher.compiled_pattern = mvzr.compile(path_pattern);
-        return watcher;
-    }
-
-    pub fn deinit(self: *Watcher, allocator: std.mem.Allocator) void {
-        allocator.free(self.folder);
-        allocator.free(self.path_pattern);
-        allocator.free(self.command);
-    }
-
-    pub fn matches(self: *const Watcher, folder: []const u8, path: []const u8) bool {
+    pub fn matches(self: *Watcher, folder: []const u8, path: []const u8) bool {
         if (!std.mem.eql(u8, folder, self.folder)) {
             return false;
         }
-        if (self.compiled_pattern) |pattern| {
-            return pattern.match(path) != null;
+        std.log.debug(
+            "Watcher match on folder {s}. Checking path {s} against pattern {s}",
+            .{ folder, path, self.path_pattern },
+        );
+        self.compiled_pattern = self.compiled_pattern orelse mvzr.compile(self.path_pattern);
+        if (self.compiled_pattern == null) {
+            std.log.err("watcher path_pattern failed to compile and will never match: {s}", .{self.path_pattern});
         }
+        if (self.compiled_pattern) |pattern|
+            return pattern.isMatch(path);
         return false;
     }
 };
 
 pub const SyncthingEvent = struct {
     id: i64,
-    type: []const u8,
+    data_type: []const u8,
     folder: []const u8,
     path: []const u8,
+    time: []const u8,
 
     pub fn fromJson(allocator: std.mem.Allocator, value: std.json.Value) !SyncthingEvent {
+        const data = value.object.get("data").?.object;
         return SyncthingEvent{
             .id = value.object.get("id").?.integer,
-            .type = try allocator.dupe(u8, value.object.get("type").?.string),
-            .folder = try allocator.dupe(u8, value.object.get("folder").?.string),
-            .path = try allocator.dupe(u8, value.object.get("path").?.string),
+            .time = value.object.get("time").?.string,
+            .data_type = try allocator.dupe(u8, data.get("type").?.string),
+            .folder = try allocator.dupe(u8, data.get("folder").?.string),
+            .path = try allocator.dupe(u8, data.get("item").?.string),
         };
     }
 
     pub fn deinit(self: *SyncthingEvent, allocator: std.mem.Allocator) void {
-        allocator.free(self.type);
+        allocator.free(self.data_type);
+        allocator.free(self.time);
         allocator.free(self.folder);
         allocator.free(self.path);
     }
@@ -75,12 +62,14 @@ pub const EventPoller = struct {
     allocator: std.mem.Allocator,
     config: Config,
     last_id: ?i64,
+    api_key: []u8,
 
-    pub fn init(allocator: std.mem.Allocator, config: Config) !EventPoller {
+    pub fn init(allocator: std.mem.Allocator, api_key: []u8, config: Config) !EventPoller {
         return .{
             .allocator = allocator,
             .config = config,
             .last_id = null,
+            .api_key = api_key,
         };
     }
 
@@ -90,6 +79,9 @@ pub const EventPoller = struct {
         defer arena.deinit();
         const aa = arena.allocator();
         try client.initDefaultProxies(aa);
+
+        var auth_buf: [1024]u8 = undefined;
+        const auth = try std.fmt.bufPrint(&auth_buf, "Bearer {s}", .{self.api_key});
 
         var retry_count: usize = 0;
         while (retry_count < self.config.max_retries) : (retry_count += 1) {
@@ -109,6 +101,9 @@ pub const EventPoller = struct {
             const response = client.fetch(.{
                 .location = .{ .url = url },
                 .response_storage = .{ .dynamic = &al },
+                .headers = .{
+                    .authorization = .{ .override = auth },
+                },
             }) catch |err| {
                 std.log.err("HTTP request failed: {s}", .{@errorName(err)});
                 if (retry_count + 1 < self.config.max_retries) {
@@ -131,6 +126,7 @@ pub const EventPoller = struct {
             var events = std.ArrayList(SyncthingEvent).init(self.allocator);
             errdefer events.deinit();
 
+            std.log.debug("Got event response:\n{s}", .{al.items});
             const parsed = try std.json.parseFromSliceLeaky(std.json.Value, aa, al.items, .{});
 
             const array = parsed.array;
@@ -173,10 +169,12 @@ fn expandCommandVariables(allocator: std.mem.Allocator, command: []const u8, eve
                 const var_name = command[i + 2 .. j];
                 if (std.mem.eql(u8, var_name, "path")) {
                     try result.appendSlice(event.path);
+                } else if (std.mem.eql(u8, var_name, "id")) {
+                    try std.fmt.format(result.writer(), "{d}", .{event.id});
                 } else if (std.mem.eql(u8, var_name, "folder")) {
                     try result.appendSlice(event.folder);
-                } else if (std.mem.eql(u8, var_name, "type")) {
-                    try result.appendSlice(event.type);
+                } else if (std.mem.eql(u8, var_name, "data_type")) {
+                    try result.appendSlice(event.data_type);
                 }
                 i = j + 1;
                 continue;
@@ -224,8 +222,11 @@ test "event parsing" {
         \\{
         \\  "id": 123,
         \\  "type": "ItemFinished",
-        \\  "folder": "default",
-        \\  "path": "test.txt"
+        \\  "data": {
+        \\    "folder": "default",
+        \\    "item": "test.txt",
+        \\    "type": "file"
+        \\  }
         \\}
     ;
 
@@ -236,7 +237,7 @@ test "event parsing" {
     defer event.deinit(std.testing.allocator);
 
     try std.testing.expectEqual(@as(i64, 123), event.id);
-    try std.testing.expectEqualStrings("ItemFinished", event.type);
+    try std.testing.expectEqualStrings("file", event.data_type);
     try std.testing.expectEqualStrings("default", event.folder);
     try std.testing.expectEqualStrings("test.txt", event.path);
 }
@@ -244,32 +245,70 @@ test "event parsing" {
 test "command variable expansion" {
     const event = SyncthingEvent{
         .id = 1,
-        .type = "ItemFinished",
+        .data_type = "file",
         .folder = "photos",
         .path = "vacation.jpg",
     };
 
-    const command = "convert ${path} -resize 800x600 thumb_${folder}_${type}.jpg";
+    const command = "convert ${path} -resize 800x600 thumb_${folder}_${id}.jpg";
     const expanded = try expandCommandVariables(std.testing.allocator, command, event);
     defer std.testing.allocator.free(expanded);
 
     try std.testing.expectEqualStrings(
-        "convert vacation.jpg -resize 800x600 thumb_photos_ItemFinished.jpg",
+        "convert vacation.jpg -resize 800x600 thumb_photos_1.jpg",
         expanded,
     );
 }
 
 test "watcher pattern matching" {
-    var watcher = try Watcher.init(
-        std.testing.allocator,
-        "photos",
-        ".*\\.jpe?g$",
-        "echo ${path}",
-    );
-    defer watcher.deinit(std.testing.allocator);
+    var watcher = Watcher{
+        .folder = "photos",
+        .path_pattern = ".*\\.jpe?g$",
+        .command = "echo ${path}",
+    };
 
     try std.testing.expect(watcher.matches("photos", "test.jpg"));
     try std.testing.expect(watcher.matches("photos", "test.jpeg"));
     try std.testing.expect(!watcher.matches("photos", "test.png"));
     try std.testing.expect(!watcher.matches("documents", "test.jpg"));
+}
+
+test "end to end config / event" {
+    const config_json =
+        \\{
+        \\  "syncthing_url": "http://test:8384",
+        \\  "max_retries": 3,
+        \\  "retry_delay_ms": 2000,
+        \\  "watchers": [
+        \\    {
+        \\      "folder": "default",
+        \\      "path_pattern": ".*\\.txt$",
+        \\      "command": "echo ${path}"
+        \\    }
+        \\  ]
+        \\}
+    ;
+
+    const parsed = try std.json.parseFromSlice(Config, std.testing.allocator, config_json, .{});
+    defer parsed.deinit();
+
+    const config = parsed.value;
+
+    const event_json =
+        \\{
+        \\  "id": 123,
+        \\  "type": "ItemFinished",
+        \\  "data": {
+        \\    "folder": "default",
+        \\    "item": "blah/test.txt",
+        \\    "type": "file"
+        \\  }
+        \\}
+    ;
+    var parsed_event = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, event_json, .{});
+    defer parsed_event.deinit();
+    var event = try SyncthingEvent.fromJson(std.testing.allocator, parsed_event.value);
+    defer event.deinit(std.testing.allocator);
+
+    try std.testing.expect(config.watchers[0].matches(event.folder, event.path));
 }
