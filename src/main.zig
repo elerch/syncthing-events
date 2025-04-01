@@ -23,22 +23,19 @@ pub fn main() !void {
         config.syncthing_url = url;
     }
 
-    var poller = try EventPoller.init(allocator, config);
-
     const stdout = std.io.getStdOut().writer();
     try stdout.print("Monitoring Syncthing events at {s}\n", .{config.syncthing_url});
 
     while (true) {
+        var arena_alloc = std.heap.ArenaAllocator.init(allocator);
+        defer arena_alloc.deinit();
+        const arena = arena_alloc.allocator();
+
+        var poller = try EventPoller.init(arena, config);
         const events = poller.poll() catch |err| {
             std.log.err("Error polling events: {s}", .{@errorName(err)});
             continue;
         };
-        defer {
-            for (events) |*event| {
-                event.deinit(allocator);
-            }
-            allocator.free(events);
-        }
 
         for (events) |event| {
             for (config.watchers) |watcher| {
