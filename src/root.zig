@@ -12,10 +12,11 @@ pub const Config = struct {
 pub const Watcher = struct {
     folder: []const u8,
     path_pattern: []const u8,
+    action: []const u8,
     command: []const u8,
     compiled_pattern: ?mvzr.Regex = null,
 
-    pub fn matches(self: *Watcher, folder: []const u8, path: []const u8) bool {
+    pub fn matches(self: *Watcher, folder: []const u8, path: []const u8, action: []const u8) bool {
         if (!std.mem.eql(u8, folder, self.folder)) {
             return false;
         }
@@ -23,6 +24,13 @@ pub const Watcher = struct {
             "Watcher match on folder {s}. Checking path {s} against pattern {s}",
             .{ folder, path, self.path_pattern },
         );
+        if (!std.mem.eql(u8, action, self.action)) {
+            std.log.debug(
+                "Event action {s}, but watching for action {s}. Skipping command",
+                .{ action, self.action },
+            );
+            return false;
+        }
         self.compiled_pattern = self.compiled_pattern orelse mvzr.compile(self.path_pattern);
         if (self.compiled_pattern == null) {
             std.log.err("watcher path_pattern failed to compile and will never match: {s}", .{self.path_pattern});
@@ -38,6 +46,7 @@ pub const SyncthingEvent = struct {
     data_type: []const u8,
     folder: []const u8,
     path: []const u8,
+    action: []const u8,
     time: []const u8,
 
     pub fn fromJson(allocator: std.mem.Allocator, value: std.json.Value) !SyncthingEvent {
@@ -47,6 +56,7 @@ pub const SyncthingEvent = struct {
             .time = try allocator.dupe(u8, value.object.get("time").?.string),
             .data_type = try allocator.dupe(u8, data.get("type").?.string),
             .folder = try allocator.dupe(u8, data.get("folder").?.string),
+            .action = try allocator.dupe(u8, data.get("action").?.string),
             .path = try allocator.dupe(u8, data.get("item").?.string),
         };
     }
@@ -55,6 +65,7 @@ pub const SyncthingEvent = struct {
         allocator.free(self.data_type);
         allocator.free(self.time);
         allocator.free(self.folder);
+        allocator.free(self.action);
         allocator.free(self.path);
     }
 };
@@ -218,6 +229,7 @@ test "config parsing" {
         \\    {
         \\      "folder": "test",
         \\      "path_pattern": ".*\\.txt$",
+        \\      "action": "update",
         \\      "command": "echo ${path}"
         \\    }
         \\  ]
@@ -247,6 +259,7 @@ test "event parsing" {
         \\  "data": {
         \\    "folder": "default",
         \\    "item": "test.txt",
+        \\    "action": "update",
         \\    "type": "file"
         \\  }
         \\}
@@ -270,6 +283,7 @@ test "command variable expansion" {
         .data_type = "file",
         .folder = "photos",
         .path = "vacation.jpg",
+        .action = "update",
         .time = "2025-04-01T11:43:51.586762264-07:00",
     };
 
@@ -288,12 +302,14 @@ test "watcher pattern matching" {
         .folder = "photos",
         .path_pattern = ".*\\.jpe?g$",
         .command = "echo ${path}",
+        .action = "update",
     };
 
-    try std.testing.expect(watcher.matches("photos", "test.jpg"));
-    try std.testing.expect(watcher.matches("photos", "test.jpeg"));
-    try std.testing.expect(!watcher.matches("photos", "test.png"));
-    try std.testing.expect(!watcher.matches("documents", "test.jpg"));
+    try std.testing.expect(watcher.matches("photos", "test.jpg", "update"));
+    try std.testing.expect(watcher.matches("photos", "test.jpeg", "update"));
+    try std.testing.expect(!watcher.matches("photos", "test.png", "update"));
+    try std.testing.expect(!watcher.matches("documents", "test.jpg", "update"));
+    try std.testing.expect(!watcher.matches("photos", "test.jpeg", "delete"));
 }
 
 test "end to end config / event" {
@@ -306,6 +322,7 @@ test "end to end config / event" {
         \\    {
         \\      "folder": "default",
         \\      "path_pattern": ".*\\.txt$",
+        \\      "action": "update",
         \\      "command": "echo ${path}"
         \\    }
         \\  ]
@@ -325,7 +342,8 @@ test "end to end config / event" {
         \\  "data": {
         \\    "folder": "default",
         \\    "item": "blah/test.txt",
-        \\    "type": "file"
+        \\    "type": "file",
+        \\    "action": "update"
         \\  }
         \\}
     ;
@@ -334,5 +352,5 @@ test "end to end config / event" {
     var event = try SyncthingEvent.fromJson(std.testing.allocator, parsed_event.value);
     defer event.deinit(std.testing.allocator);
 
-    try std.testing.expect(config.watchers[0].matches(event.folder, event.path));
+    try std.testing.expect(config.watchers[0].matches(event.folder, event.path, event.action));
 }

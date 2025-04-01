@@ -71,7 +71,7 @@ pub fn main() !u8 {
 
         for (events) |event| {
             for (config.watchers) |watcher| {
-                if (watcher.matches(event.folder, event.path)) {
+                if (watcher.matches(event.folder, event.path, event.action)) {
                     try stdout.print("Match found for folder {s}, path {s}, executing command\n\t{s}\n", .{ event.folder, event.path, watcher.command });
                     try lib.executeCommand(allocator, watcher.command, event);
                 }
@@ -178,6 +178,7 @@ test "config loading" {
         \\    {
         \\      "folder": "test",
         \\      "path_pattern": ".*\\.txt$",
+        \\      "action": "update",
         \\      "command": "echo ${path}"
         \\    }
         \\  ]
