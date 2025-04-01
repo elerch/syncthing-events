@@ -40,6 +40,10 @@
             .url = "https://github.com/mnemnion/mvzr/archive/f8bc95fe2488e2503a16b7e9baf5e679778c8707.tar.gz",
             .hash = "mvzr-0.3.2-ZSOky95lAQA00lXTN_g8JWoBuh8pw-jyzmCWAqlu1h8L",
         },
+        .zeit = .{
+            .url = "https://github.com/rockorager/zeit/archive/44bebf856693332b168d8ba2c45b9d1ec15511de.tar.gz",
+            .hash = "zeit-0.0.0-5I6bk_pZAgB03N1p1GmVOZ--gOFwwQSRKj1UXb5tnaKS",
+        },
     },
     .paths = .{
         "build.zig",

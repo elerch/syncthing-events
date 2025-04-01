@@ -1,5 +1,6 @@
 const std = @import("std");
 const mvzr = @import("mvzr");
+const zeit = @import("zeit");
 
 pub const Config = struct {
     syncthing_url: []const u8 = "http://localhost:8384",
@@ -43,7 +44,7 @@ pub const SyncthingEvent = struct {
         const data = value.object.get("data").?.object;
         return SyncthingEvent{
             .id = value.object.get("id").?.integer,
-            .time = value.object.get("time").?.string,
+            .time = try allocator.dupe(u8, value.object.get("time").?.string),
             .data_type = try allocator.dupe(u8, data.get("type").?.string),
             .folder = try allocator.dupe(u8, data.get("folder").?.string),
             .path = try allocator.dupe(u8, data.get("item").?.string),
@@ -84,6 +85,7 @@ pub const EventPoller = struct {
         const auth = try std.fmt.bufPrint(&auth_buf, "Bearer {s}", .{self.api_key});
 
         var retry_count: usize = 0;
+        const first_run = self.last_id == null;
         while (retry_count < self.config.max_retries) : (retry_count += 1) {
             var url_buf: [1024]u8 = undefined;
             var since_buf: [100]u8 = undefined;
@@ -126,23 +128,42 @@ pub const EventPoller = struct {
             var events = std.ArrayList(SyncthingEvent).init(self.allocator);
             errdefer events.deinit();
 
-            std.log.debug("Got event response:\n{s}", .{al.items});
             const parsed = try std.json.parseFromSliceLeaky(std.json.Value, aa, al.items, .{});
 
             const array = parsed.array;
+            if (first_run)
+                std.log.info("Got first run event response with {d} items", .{array.items.len})
+            else if (array.items.len > 0)
+                std.log.debug("Got event response:\n{s}", .{al.items});
+
+            var skipped_events: usize = 0;
             for (array.items) |item| {
-                const event = try SyncthingEvent.fromJson(self.allocator, item);
-                try events.append(event);
-                if (self.last_id == null or event.id > self.last_id.?) {
+                var event = try SyncthingEvent.fromJson(self.allocator, item);
+                if (self.last_id == null or event.id > self.last_id.?)
                     self.last_id = event.id;
+                if (first_run and try eventIsOld(event)) {
+                    skipped_events += 1;
+                    event.deinit(self.allocator);
+                    continue;
                 }
+
+                try events.append(event);
             }
+            if (skipped_events > 0)
+                std.log.info("Skipped {d} old events", .{skipped_events});
 
             return try events.toOwnedSlice();
         }
         return error.MaxRetriesExceeded;
     }
 };
+
+pub fn eventIsOld(event: SyncthingEvent) !bool {
+    const event_instant = try zeit.instant(.{ .source = .{ .rfc3339 = event.time } });
+    var recent = try zeit.instant(.{});
+    recent.timestamp -= std.time.ns_per_s * 60; // Grab any events newer than the last minute
+    return event_instant.time().before(recent.time());
+}
 
 pub fn executeCommand(allocator: std.mem.Allocator, command: []const u8, event: SyncthingEvent) !void {
     const expanded_cmd = try expandCommandVariables(allocator, command, event);
@@ -221,6 +242,7 @@ test "event parsing" {
     const event_json =
         \\{
         \\  "id": 123,
+        \\  "time": "2025-04-01T11:43:51.581184474-07:00",
         \\  "type": "ItemFinished",
         \\  "data": {
         \\    "folder": "default",
@@ -248,6 +270,7 @@ test "command variable expansion" {
         .data_type = "file",
         .folder = "photos",
         .path = "vacation.jpg",
+        .time = "2025-04-01T11:43:51.586762264-07:00",
     };
 
     const command = "convert ${path} -resize 800x600 thumb_${folder}_${id}.jpg";
@@ -298,6 +321,7 @@ test "end to end config / event" {
         \\{
         \\  "id": 123,
         \\  "type": "ItemFinished",
+        \\  "time": "2025-04-01T11:43:51.581184474-07:00",
         \\  "data": {
         \\    "folder": "default",
         \\    "item": "blah/test.txt",

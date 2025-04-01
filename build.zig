@@ -16,6 +16,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const mvzr_dep = b.dependency("mvzr", .{});
+    const zeit_dep = b.dependency("zeit", .{});
     // This creates a "module", which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
     // Every executable or library we compile will be based on one or more modules.
@@ -30,6 +31,7 @@ pub fn build(b: *std.Build) void {
     });
 
     lib_mod.addImport("mvzr", mvzr_dep.module("mvzr"));
+    lib_mod.addImport("zeit", zeit_dep.module("zeit"));
 
     // We will also create a module for our other entry point, 'main.zig'.
     const exe_mod = b.createModule(.{
