@@ -8,6 +8,24 @@ const Args = struct {
     syncthing_url: ?[]const u8 = null,
 };
 
+pub const std_options: std.Options = .{
+    .logFn = logFn,
+    .log_level = .debug,
+};
+
+var log_level = std.log.default_level;
+
+fn logFn(
+    comptime message_level: std.log.Level,
+    comptime scope: @TypeOf(.enum_literal),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (@intFromEnum(message_level) <= @intFromEnum(log_level)) {
+        std.log.defaultLog(message_level, scope, format, args);
+    }
+}
+
 pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
     defer _ = gpa.deinit();
@@ -104,6 +122,8 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
                 std.debug.print("Error: --url requires a URL argument\n", .{});
                 std.process.exit(1);
             }
+        } else if (std.mem.eql(u8, arg, "-v")) {
+            moreVerbose();
         } else if (std.mem.eql(u8, arg, "--help")) {
             printUsage();
             std.process.exit(0);
@@ -111,6 +131,14 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
     }
 
     return args;
+}
+
+fn moreVerbose() void {
+    log_level = switch (log_level) {
+        .info, .debug => .debug,
+        .warn => .info,
+        .err => .warn,
+    };
 }
 
 const FileType = enum {
@@ -145,7 +173,8 @@ fn printUsage() void {
         \\Options:
         \\  --config <path>  Path to config file (default: config.json)
         \\  --url <url>      Override Syncthing URL from config
-        \\  --help          Show this help message
+        \\  -v               Increase logging verbosity (can be used multiple times)
+        \\  --help           Show this help message
         \\
         \\ST_EVENTS_AUTH environment variable must contain the auth token for
         \\syncthing. This can be found in the syncthing UI by clicking Actions,
