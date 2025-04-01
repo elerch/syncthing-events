@@ -9,21 +9,21 @@ const Args = struct {
 };
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     const args = try parseArgs(allocator);
 
-    var config = try loadConfig(allocator, args.config_path);
-    defer config.deinit(allocator);
+    var parsed_config = try loadConfig(allocator, args.config_path);
+    defer parsed_config.deinit();
+    var config = parsed_config.value;
 
     if (args.syncthing_url) |url| {
         config.syncthing_url = url;
     }
 
     var poller = try EventPoller.init(allocator, config);
-    defer poller.deinit();
 
     const stdout = std.io.getStdOut().writer();
     try stdout.print("Monitoring Syncthing events at {s}\n", .{config.syncthing_url});
@@ -83,7 +83,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
     return args;
 }
 
-fn loadConfig(allocator: Allocator, path: []const u8) !Config {
+fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !std.json.Parsed(Config) {
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
@@ -93,13 +93,7 @@ fn loadConfig(allocator: Allocator, path: []const u8) !Config {
 
     const ext = std.fs.path.extension(path);
     if (std.mem.eql(u8, ext, ".json")) {
-        var parser = std.json.Parser.init(allocator, false);
-        defer parser.deinit();
-
-        var tree = try parser.parse(content);
-        defer tree.deinit();
-
-        return try std.json.parse(Config, &tree, .{ .allocator = allocator });
+        return try std.json.parseFromSlice(Config, allocator, content, .{});
     } else if (std.mem.eql(u8, ext, ".zon")) {
         // TODO: Implement ZON parsing
         return error.UnsupportedConfigFormat;

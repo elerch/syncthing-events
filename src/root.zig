@@ -1,16 +1,14 @@
 const std = @import("std");
-const json = std.json;
-const Allocator = std.mem.Allocator;
 const testing = std.testing;
 const mvzr = @import("mvzr");
 
 pub const Config = struct {
     syncthing_url: []const u8 = "http://localhost:8384",
-    max_retries: u32 = 5,
+    max_retries: usize = std.math.maxInt(usize),
     retry_delay_ms: u32 = 1000,
     watchers: []Watcher,
 
-    pub fn deinit(self: *Config, allocator: Allocator) void {
+    pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
         for (self.watchers) |*watcher| {
             watcher.deinit(allocator);
         }
@@ -22,9 +20,9 @@ pub const Watcher = struct {
     folder: []const u8,
     path_pattern: []const u8,
     command: []const u8,
-    compiled_pattern: ?mvzr.Pattern = null,
+    compiled_pattern: ?mvzr.Regex = null,
 
-    pub fn init(allocator: Allocator, folder: []const u8, path_pattern: []const u8, command: []const u8) !Watcher {
+    pub fn init(allocator: std.mem.Allocator, folder: []const u8, path_pattern: []const u8, command: []const u8) !Watcher {
         var watcher = Watcher{
             .folder = try allocator.dupe(u8, folder),
             .path_pattern = try allocator.dupe(u8, path_pattern),
@@ -35,7 +33,7 @@ pub const Watcher = struct {
         return watcher;
     }
 
-    pub fn deinit(self: *Watcher, allocator: Allocator) void {
+    pub fn deinit(self: *Watcher, allocator: std.mem.Allocator) void {
         if (self.compiled_pattern) |*pattern| {
             pattern.deinit();
         }
@@ -49,7 +47,7 @@ pub const Watcher = struct {
             return false;
         }
         if (self.compiled_pattern) |pattern| {
-            return pattern.match(path);
+            return pattern.match(path) != null;
         }
         return false;
     }
@@ -60,8 +58,8 @@ pub const SyncthingEvent = struct {
     type: []const u8,
     folder: []const u8,
     path: []const u8,
-    
-    pub fn fromJson(allocator: Allocator, value: json.Value) !SyncthingEvent {
+
+    pub fn fromJson(allocator: std.mem.Allocator, value: std.json.Value) !SyncthingEvent {
         return SyncthingEvent{
             .id = value.object.get("id").?.integer,
             .type = try allocator.dupe(u8, value.object.get("type").?.string),
@@ -70,7 +68,7 @@ pub const SyncthingEvent = struct {
         };
     }
 
-    pub fn deinit(self: *SyncthingEvent, allocator: Allocator) void {
+    pub fn deinit(self: *SyncthingEvent, allocator: std.mem.Allocator) void {
         allocator.free(self.type);
         allocator.free(self.folder);
         allocator.free(self.path);
@@ -78,36 +76,44 @@ pub const SyncthingEvent = struct {
 };
 
 pub const EventPoller = struct {
-    allocator: Allocator,
+    allocator: std.mem.Allocator,
     config: Config,
-    last_id: i64,
-    client: std.http.Client,
+    last_id: ?i64,
 
-    pub fn init(allocator: Allocator, config: Config) !EventPoller {
-        return EventPoller{
+    pub fn init(allocator: std.mem.Allocator, config: Config) !EventPoller {
+        return .{
             .allocator = allocator,
             .config = config,
-            .last_id = 0,
-            .client = std.http.Client.init(allocator),
+            .last_id = null,
         };
     }
 
-    pub fn deinit(self: *EventPoller) void {
-        self.client.deinit();
-    }
-
     pub fn poll(self: *EventPoller) ![]SyncthingEvent {
-        var retry_count: u32 = 0;
+        var client = std.http.Client{ .allocator = self.allocator };
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const aa = arena.allocator();
+        try client.initDefaultProxies(aa);
+
+        var retry_count: usize = self.config.max_retries;
         while (retry_count < self.config.max_retries) : (retry_count += 1) {
-            var url_buf: [256]u8 = undefined;
-            const url = try std.fmt.bufPrint(&url_buf, "{s}/rest/events?events=ItemFinished&since={d}", .{
-                self.config.syncthing_url, self.last_id,
+            var url_buf: [1024]u8 = undefined;
+            var since_buf: [100]u8 = undefined;
+            const since = if (self.last_id) |id|
+                try std.fmt.bufPrint(&since_buf, "&since={d}", .{id})
+            else
+                "";
+            const url = try std.fmt.bufPrint(&url_buf, "{s}/rest/events?events=ItemFinished{s}", .{
+                self.config.syncthing_url, since,
             });
 
-            var events = std.ArrayList(SyncthingEvent).init(self.allocator);
-            errdefer events.deinit();
+            var al = std.ArrayList(u8).init(self.allocator);
+            defer al.deinit();
 
-            var response = self.client.get(url) catch |err| {
+            const response = client.fetch(.{
+                .location = .{ .url = url },
+                .response_storage = .{ .dynamic = &al },
+            }) catch |err| {
                 std.log.err("HTTP request failed: {s}", .{@errorName(err)});
                 if (retry_count + 1 < self.config.max_retries) {
                     std.time.sleep(self.config.retry_delay_ms * std.time.ns_per_ms);
@@ -115,10 +121,9 @@ pub const EventPoller = struct {
                 }
                 return err;
             };
-            defer response.deinit();
 
-            if (response.status_code != 200) {
-                std.log.err("HTTP status code: {d}", .{response.status_code});
+            if (response.status != .ok) {
+                std.log.err("HTTP status code: {}", .{response.status});
                 if (retry_count + 1 < self.config.max_retries) {
                     std.time.sleep(self.config.retry_delay_ms * std.time.ns_per_ms);
                     continue;
@@ -126,39 +131,39 @@ pub const EventPoller = struct {
                 return error.HttpError;
             }
 
-            var parser = json.Parser.init(self.allocator, false);
-            defer parser.deinit();
+            var events = std.ArrayList(SyncthingEvent).init(self.allocator);
+            errdefer events.deinit();
 
-            var tree = try parser.parse(response.body);
-            defer tree.deinit();
+            const parsed = try std.json.parseFromSliceLeaky(std.json.Value, aa, al.items, .{});
 
-            const array = tree.root.array;
+            const array = parsed.array;
             for (array.items) |item| {
                 const event = try SyncthingEvent.fromJson(self.allocator, item);
                 try events.append(event);
-                if (event.id > self.last_id) {
+                if (self.last_id == null or event.id > self.last_id.?) {
                     self.last_id = event.id;
                 }
             }
 
-            return events.toOwnedSlice();
+            return try events.toOwnedSlice();
         }
         return error.MaxRetriesExceeded;
     }
 };
 
-pub fn executeCommand(allocator: Allocator, command: []const u8, event: SyncthingEvent) !void {
-    var expanded_cmd = try expandCommandVariables(allocator, command, event);
+pub fn executeCommand(allocator: std.mem.Allocator, command: []const u8, event: SyncthingEvent) !void {
+    const expanded_cmd = try expandCommandVariables(allocator, command, event);
     defer allocator.free(expanded_cmd);
 
-    var process = std.ChildProcess.init(&[_][]const u8{ "sh", "-c", expanded_cmd }, allocator);
+    // TODO: Should this spawn sh like this, or exec directly?
+    var process = std.process.Child.init(&[_][]const u8{ "sh", "-c", expanded_cmd }, allocator);
     process.stdout_behavior = .Inherit;
     process.stderr_behavior = .Inherit;
 
     _ = try process.spawnAndWait();
 }
 
-fn expandCommandVariables(allocator: Allocator, command: []const u8, event: SyncthingEvent) ![]const u8 {
+fn expandCommandVariables(allocator: std.mem.Allocator, command: []const u8, event: SyncthingEvent) ![]const u8 {
     var result = std.ArrayList(u8).init(allocator);
     defer result.deinit();
 
@@ -203,13 +208,13 @@ test "config parsing" {
         \\}
     ;
 
-    var parser = json.Parser.init(testing.allocator, false);
+    var parser = std.json.Parser.init(testing.allocator, false);
     defer parser.deinit();
 
     var tree = try parser.parse(config_json);
     defer tree.deinit();
 
-    const config = try json.parse(Config, &tree, .{ .allocator = testing.allocator });
+    const config = try std.json.parse(Config, &tree, .{ .allocator = testing.allocator });
     defer config.deinit(testing.allocator);
 
     try testing.expectEqualStrings("http://test:8384", config.syncthing_url);
@@ -231,7 +236,7 @@ test "event parsing" {
         \\}
     ;
 
-    var parser = json.Parser.init(testing.allocator, false);
+    var parser = std.json.Parser.init(testing.allocator, false);
     defer parser.deinit();
 
     var tree = try parser.parse(event_json);
