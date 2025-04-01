@@ -8,7 +8,7 @@ const Args = struct {
     syncthing_url: ?[]const u8 = null,
 };
 
-pub fn main() !void {
+pub fn main() !u8 {
     var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -32,9 +32,19 @@ pub fn main() !void {
         const arena = arena_alloc.allocator();
 
         var poller = try EventPoller.init(arena, config);
-        const events = poller.poll() catch |err| {
-            std.log.err("Error polling events: {s}", .{@errorName(err)});
-            continue;
+        const events = poller.poll() catch |err| switch (err) {
+            error.Unauthorized => {
+                std.log.err("Not authorized to use syncthing. Please set ST_EVENTS_AUTH environment variable and try again", .{});
+                return 2;
+            },
+            error.MaxRetriesExceeded => {
+                std.log.err("Maximum retries exceeded - exiting", .{});
+                return 1;
+            },
+            else => {
+                std.log.err("Error polling events: {s}", .{@errorName(err)});
+                continue;
+            },
         };
 
         for (events) |event| {
@@ -46,6 +56,7 @@ pub fn main() !void {
             }
         }
     }
+    return 0;
 }
 
 fn parseArgs(allocator: std.mem.Allocator) !Args {

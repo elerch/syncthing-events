@@ -91,7 +91,7 @@ pub const EventPoller = struct {
         const aa = arena.allocator();
         try client.initDefaultProxies(aa);
 
-        var retry_count: usize = self.config.max_retries;
+        var retry_count: usize = 0;
         while (retry_count < self.config.max_retries) : (retry_count += 1) {
             var url_buf: [1024]u8 = undefined;
             var since_buf: [100]u8 = undefined;
@@ -118,6 +118,7 @@ pub const EventPoller = struct {
                 return err;
             };
 
+            if (response.status == .forbidden) return error.Unauthorized;
             if (response.status != .ok) {
                 std.log.err("HTTP status code: {}", .{response.status});
                 if (retry_count + 1 < self.config.max_retries) {
