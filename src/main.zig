@@ -64,12 +64,18 @@ pub fn main() !u8 {
     try stdout.print("Monitoring Syncthing events at {s}\n", .{config.syncthing_url});
 
     var last_id: ?i64 = null;
+    const connection_pool = std.http.Client.ConnectionPool{};
     while (true) {
         var arena_alloc = std.heap.ArenaAllocator.init(allocator);
         defer arena_alloc.deinit();
         const arena = arena_alloc.allocator();
 
-        var poller = try EventPoller.init(arena, api_key, config);
+        var poller = try EventPoller.init(
+            arena,
+            api_key,
+            config,
+            connection_pool,
+        );
         defer last_id = poller.last_id;
         poller.last_id = last_id;
         const events = poller.poll() catch |err| switch (err) {

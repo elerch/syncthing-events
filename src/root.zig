@@ -75,18 +75,20 @@ pub const EventPoller = struct {
     config: Config,
     last_id: ?i64,
     api_key: []u8,
+    connection_pool: std.http.Client.ConnectionPool,
 
-    pub fn init(allocator: std.mem.Allocator, api_key: []u8, config: Config) !EventPoller {
+    pub fn init(allocator: std.mem.Allocator, api_key: []u8, config: Config, connection_pool: ?std.http.Client.ConnectionPool) !EventPoller {
         return .{
             .allocator = allocator,
             .config = config,
             .last_id = null,
             .api_key = api_key,
+            .connection_pool = connection_pool orelse .{},
         };
     }
 
     pub fn poll(self: *EventPoller) ![]SyncthingEvent {
-        var client = std.http.Client{ .allocator = self.allocator };
+        var client = std.http.Client{ .allocator = self.allocator, .connection_pool = self.connection_pool };
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         const aa = arena.allocator();
