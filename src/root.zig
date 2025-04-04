@@ -95,6 +95,8 @@ pub const EventPoller = struct {
         var auth_buf: [1024]u8 = undefined;
         const auth = try std.fmt.bufPrint(&auth_buf, "Bearer {s}", .{self.api_key});
 
+        var ucf_retries: usize = 0;
+        const MAX_UCF_RETRIES: usize = 20;
         var retry_count: usize = 0;
         const first_run = self.last_id == null;
         while (retry_count < self.config.max_retries) : (retry_count += 1) {
@@ -118,13 +120,22 @@ pub const EventPoller = struct {
                     .authorization = .{ .override = auth },
                 },
             }) catch |err| {
-                std.log.err("HTTP request failed: {s}", .{@errorName(err)});
+                if (err == error.UnexpectedConnectFailure) {
+                    ucf_retries += 1;
+                    std.log.err(
+                        "Unexpected connection failure - may not be recoverable. Retry {d}/{d}",
+                        .{ ucf_retries, MAX_UCF_RETRIES },
+                    );
+                    if (ucf_retries >= MAX_UCF_RETRIES) return error.MaximumUnexpectedConnectionFailureRetriesExceeded;
+                    continue;
+                } else std.log.err("HTTP request failed: {s}", .{@errorName(err)});
                 if (retry_count + 1 < self.config.max_retries) {
                     std.time.sleep(self.config.retry_delay_ms * std.time.ns_per_ms);
                     continue;
                 }
                 return err;
             };
+            ucf_retries = 0;
 
             if (response.status == .forbidden) return error.Unauthorized;
             if (response.status != .ok) {

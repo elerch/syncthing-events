@@ -81,6 +81,10 @@ pub fn main() !u8 {
                 std.log.err("Maximum retries exceeded - exiting", .{});
                 return 1;
             },
+            error.MaximumUnexpectedConnectionFailureRetriesExceeded => {
+                std.log.err("Maximum unexpected connection failure retries exceeded - exiting", .{});
+                return 100; // This feels like a system issue of some sort
+            },
             else => {
                 std.log.err("Error polling events: {s}", .{@errorName(err)});
                 continue;
