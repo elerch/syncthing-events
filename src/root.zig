@@ -59,6 +59,8 @@ pub const SyncthingEvent = struct {
 
     pub fn fromJson(allocator: std.mem.Allocator, value: std.json.Value) !SyncthingEvent {
         const data = value.object.get("data").?.object;
+        // event values differ on this point...
+        const path = data.get("item") orelse data.get("path");
         return SyncthingEvent{
             .id = value.object.get("id").?.integer,
             .time = try allocator.dupe(u8, value.object.get("time").?.string),
@@ -66,7 +68,7 @@ pub const SyncthingEvent = struct {
             .data_type = try allocator.dupe(u8, data.get("type").?.string),
             .folder = try allocator.dupe(u8, data.get("folder").?.string),
             .action = try allocator.dupe(u8, data.get("action").?.string),
-            .path = try allocator.dupe(u8, data.get("item").?.string),
+            .path = try allocator.dupe(u8, path.?.string),
         };
     }
 
