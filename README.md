@@ -47,6 +47,7 @@ Create a configuration file in either JSON, ZON, or YAML format. Example (in JSO
 - `watchers`: Array of event watchers with the following properties:
   - `folder`: Syncthing folder ID to watch
   - `path_pattern`: Regular expression to match file paths
+  - `action`: Action to match on (deleted, updated, modified, etc). Defaults to '*', which is all actions
   - `event_type`: [Event type](https://docs.syncthing.net/dev/events.html#event-types) to match on. Defaults to ItemFinished
   - `command`: Command to execute when a match is found. Supports variables:
     - `${path}`: Full path to the changed file

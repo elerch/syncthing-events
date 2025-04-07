@@ -12,23 +12,29 @@ pub const Config = struct {
 pub const Watcher = struct {
     folder: []const u8,
     path_pattern: []const u8,
-    action: []const u8,
+    action: []const u8 = "*",
     event_type: []const u8 = "ItemFinished",
     command: []const u8,
     compiled_pattern: ?mvzr.Regex = null,
 
-    pub fn matches(self: *Watcher, folder: []const u8, path: []const u8, action: []const u8) bool {
-        if (!std.mem.eql(u8, folder, self.folder)) {
+    pub fn matches(self: *Watcher, event: SyncthingEvent) bool {
+        if (!std.mem.eql(u8, event.folder, self.folder)) {
+            return false;
+        }
+        if (!std.mem.eql(u8, event.event_type, self.event_type)) {
             return false;
         }
         std.log.debug(
-            "Watcher match on folder {s}. Checking path {s} against pattern {s}",
-            .{ folder, path, self.path_pattern },
+            "Watcher match on folder {s}/event type {s}. Checking path {s} against pattern {s}",
+            .{ event.folder, event.event_type, event.path, self.path_pattern },
         );
-        if (!std.mem.eql(u8, action, self.action)) {
+        const action_match =
+            (self.action.len == 1 and self.action[0] == '*') or
+            std.mem.eql(u8, event.action, self.action);
+        if (!action_match) {
             std.log.debug(
                 "Event action {s}, but watching for action {s}. Skipping command",
-                .{ action, self.action },
+                .{ event.action, self.action },
             );
             return false;
         }
@@ -37,7 +43,7 @@ pub const Watcher = struct {
             std.log.err("watcher path_pattern failed to compile and will never match: {s}", .{self.path_pattern});
         }
         if (self.compiled_pattern) |pattern|
-            return pattern.isMatch(path);
+            return pattern.isMatch(event.path);
         return false;
     }
 };
@@ -334,11 +340,11 @@ test "watcher pattern matching" {
         .action = "update",
     };
 
-    try std.testing.expect(watcher.matches("photos", "test.jpg", "update"));
-    try std.testing.expect(watcher.matches("photos", "test.jpeg", "update"));
-    try std.testing.expect(!watcher.matches("photos", "test.png", "update"));
-    try std.testing.expect(!watcher.matches("documents", "test.jpg", "update"));
-    try std.testing.expect(!watcher.matches("photos", "test.jpeg", "delete"));
+    try std.testing.expect(watcher.matches(.{ .folder = "photos", .path = "test.jpg", .data_type = "update", .event_type = "ItemFinished" }));
+    try std.testing.expect(watcher.matches(.{ .folder = "photos", .path = "test.jpeg", .data_type = "update", .event_type = "ItemFinished" }));
+    try std.testing.expect(watcher.matches(.{ .folder = "photos", .path = "test.png", .data_type = "update", .event_type = "ItemFinished" }));
+    try std.testing.expect(watcher.matches(.{ .folder = "documents", .path = "test.jpg", .data_type = "update", .event_type = "ItemFinished" }));
+    try std.testing.expect(watcher.matches(.{ .folder = "photos", .path = "test.jpeg", .data_type = "delete", .event_type = "ItemFinished" }));
 }
 
 test "end to end config / event" {
@@ -381,5 +387,5 @@ test "end to end config / event" {
     var event = try SyncthingEvent.fromJson(std.testing.allocator, parsed_event.value);
     defer event.deinit(std.testing.allocator);
 
-    try std.testing.expect(config.watchers[0].matches(event.folder, event.path, event.action));
+    try std.testing.expect(config.watchers[0].matches(event));
 }
