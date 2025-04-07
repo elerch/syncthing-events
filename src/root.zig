@@ -246,7 +246,17 @@ fn expandCommandVariables(allocator: std.mem.Allocator, command: []const u8, eve
                 } else if (std.mem.eql(u8, var_name, "folder")) {
                     try result.appendSlice(event.folder);
                 } else if (std.mem.eql(u8, var_name, "data_type")) {
+                    try result.appendSlice(event.event_type);
+                } else if (std.mem.eql(u8, var_name, "event_type")) {
                     try result.appendSlice(event.data_type);
+                } else if (std.mem.eql(u8, var_name, "action")) {
+                    try result.appendSlice(event.action);
+                } else if (std.mem.eql(u8, var_name, "dump")) {
+                    try std.json.stringify(
+                        event,
+                        .{ .whitespace = .indent_2 },
+                        result.writer(),
+                    );
                 }
                 i = j + 1;
                 continue;
