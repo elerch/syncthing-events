@@ -121,7 +121,10 @@ pub const EventPoller = struct {
     }
 
     pub fn poll(self: *EventPoller) ![]SyncthingEvent {
-        var client = std.http.Client{ .allocator = self.allocator, .connection_pool = self.connection_pool };
+        var client = std.http.Client{
+            .allocator = self.allocator,
+            .connection_pool = self.connection_pool,
+        };
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         const aa = arena.allocator();
