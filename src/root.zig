@@ -56,11 +56,16 @@ pub const SyncthingEvent = struct {
     path: []const u8,
     action: []const u8,
     time: []const u8,
+    original_json: []const u8,
 
     pub fn fromJson(allocator: std.mem.Allocator, value: std.json.Value) !SyncthingEvent {
         const data = value.object.get("data").?.object;
         // event values differ on this point...
         const path = data.get("item") orelse data.get("path");
+
+        var al = std.ArrayList(u8).init(allocator);
+        defer al.deinit();
+        try std.json.stringify(value, .{ .whitespace = .indent_2 }, al.writer());
         return SyncthingEvent{
             .id = value.object.get("id").?.integer,
             .time = try allocator.dupe(u8, value.object.get("time").?.string),
@@ -69,6 +74,7 @@ pub const SyncthingEvent = struct {
             .folder = try allocator.dupe(u8, data.get("folder").?.string),
             .action = try allocator.dupe(u8, data.get("action").?.string),
             .path = try allocator.dupe(u8, path.?.string),
+            .original_json = try al.toOwnedSlice(),
         };
     }
 
@@ -78,6 +84,7 @@ pub const SyncthingEvent = struct {
         allocator.free(self.folder);
         allocator.free(self.action);
         allocator.free(self.path);
+        allocator.free(self.original_json);
     }
 };
 
@@ -252,11 +259,7 @@ fn expandCommandVariables(allocator: std.mem.Allocator, command: []const u8, eve
                 } else if (std.mem.eql(u8, var_name, "action")) {
                     try result.appendSlice(event.action);
                 } else if (std.mem.eql(u8, var_name, "dump")) {
-                    try std.json.stringify(
-                        event,
-                        .{ .whitespace = .indent_2 },
-                        result.writer(),
-                    );
+                    try result.appendSlice(event.original_json);
                 }
                 i = j + 1;
                 continue;
