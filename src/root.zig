@@ -13,6 +13,7 @@ pub const Watcher = struct {
     folder: []const u8,
     path_pattern: []const u8,
     action: []const u8,
+    event_type: []const u8 = "ItemFinished",
     command: []const u8,
     compiled_pattern: ?mvzr.Regex = null,
 
@@ -43,6 +44,7 @@ pub const Watcher = struct {
 
 pub const SyncthingEvent = struct {
     id: i64,
+    event_type: []const u8,
     data_type: []const u8,
     folder: []const u8,
     path: []const u8,
@@ -54,6 +56,7 @@ pub const SyncthingEvent = struct {
         return SyncthingEvent{
             .id = value.object.get("id").?.integer,
             .time = try allocator.dupe(u8, value.object.get("time").?.string),
+            .event_type = try allocator.dupe(u8, value.object.get("type").?.string),
             .data_type = try allocator.dupe(u8, data.get("type").?.string),
             .folder = try allocator.dupe(u8, data.get("folder").?.string),
             .action = try allocator.dupe(u8, data.get("action").?.string),
@@ -87,6 +90,28 @@ pub const EventPoller = struct {
         };
     }
 
+    pub fn url(self: EventPoller) ![]const u8 {
+        const watched_events = blk: {
+            var type_set = std.StringArrayHashMap(void).init(self.allocator);
+            try type_set.ensureTotalCapacity(self.config.watchers.len);
+            for (self.config.watchers) |watcher|
+                type_set.putAssumeCapacity(watcher.event_type, {});
+            break :blk try std.mem.join(self.allocator, ",", type_set.keys());
+        };
+        var since_buf: [100]u8 = undefined;
+        const since = if (self.last_id) |id|
+            try std.fmt.bufPrint(&since_buf, "&since={d}", .{id})
+        else
+            "";
+        return try std.fmt.allocPrint(
+            self.allocator,
+            "{s}/rest/events?events={s}{s}",
+            .{
+                self.config.syncthing_url, watched_events, since,
+            },
+        );
+    }
+
     pub fn poll(self: *EventPoller) ![]SyncthingEvent {
         var client = std.http.Client{ .allocator = self.allocator, .connection_pool = self.connection_pool };
         var arena = std.heap.ArenaAllocator.init(self.allocator);
@@ -101,22 +126,13 @@ pub const EventPoller = struct {
         const MAX_UCF_RETRIES: usize = 20;
         var retry_count: usize = 0;
         const first_run = self.last_id == null;
+        const poll_url = try self.url();
         while (retry_count < self.config.max_retries) : (retry_count += 1) {
-            var url_buf: [1024]u8 = undefined;
-            var since_buf: [100]u8 = undefined;
-            const since = if (self.last_id) |id|
-                try std.fmt.bufPrint(&since_buf, "&since={d}", .{id})
-            else
-                "";
-            const url = try std.fmt.bufPrint(&url_buf, "{s}/rest/events?events=ItemFinished{s}", .{
-                self.config.syncthing_url, since,
-            });
-
             var al = std.ArrayList(u8).init(self.allocator);
             defer al.deinit();
 
             const response = client.fetch(.{
-                .location = .{ .url = url },
+                .location = .{ .url = poll_url },
                 .response_storage = .{ .dynamic = &al },
                 .headers = .{
                     .authorization = .{ .override = auth },

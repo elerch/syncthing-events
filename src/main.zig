@@ -6,6 +6,11 @@ const EventPoller = lib.EventPoller;
 const Args = struct {
     config_path: []const u8 = "config.json",
     syncthing_url: ?[]const u8 = null,
+
+    pub fn deinit(self: Args, allocator: std.mem.Allocator) void {
+        allocator.free(self.config_path);
+        if (self.syncthing_url) |url| allocator.free(url);
+    }
 };
 
 pub const std_options: std.Options = .{
@@ -32,6 +37,7 @@ pub fn main() !u8 {
     const allocator = gpa.allocator();
 
     const args = try parseArgs(allocator);
+    defer args.deinit(allocator);
 
     const file = try std.fs.cwd().openFile(args.config_path, .{});
     defer file.close();
@@ -61,7 +67,6 @@ pub fn main() !u8 {
     }
 
     const stdout = std.io.getStdOut().writer();
-    try stdout.print("Monitoring Syncthing events at {s}\n", .{config.syncthing_url});
 
     var last_id: ?i64 = null;
     const connection_pool = std.http.Client.ConnectionPool{};
@@ -76,6 +81,8 @@ pub fn main() !u8 {
             config,
             connection_pool,
         );
+        if (last_id == null) // first run
+            try stdout.print("Monitoring Syncthing events at {s}\n", .{try poller.url()});
         defer last_id = poller.last_id;
         poller.last_id = last_id;
         const events = poller.poll() catch |err| switch (err) {
