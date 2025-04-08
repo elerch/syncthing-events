@@ -107,7 +107,11 @@ pub fn main() !u8 {
         for (events) |event| {
             for (config.watchers) |watcher| {
                 if (watcher.matches(event)) {
-                    try stdout.print("Match found for folder {s}, path {s}, executing command\n\t{s}\n", .{ event.folder, event.path, watcher.command });
+                    try stdout.print(
+                        "Match - Folder: {s} Action: {s} Event type: {s} Path: {s}\n",
+                        .{ event.folder, event.action, event.event_type, event.path },
+                    );
+                    std.log.debug("Executing command \n\t{s}", .{watcher.command});
                     try lib.executeCommand(allocator, watcher.command, event);
                 }
             }
