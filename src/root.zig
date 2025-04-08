@@ -132,6 +132,7 @@ pub const EventPoller = struct {
             .allocator = self.allocator,
             .connection_pool = self.connection_pool,
         };
+        defer client.deinit();
         var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         const aa = arena.allocator();
