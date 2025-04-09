@@ -71,7 +71,9 @@ pub fn main() !u8 {
     var last_id: ?i64 = null;
     const connection_pool = std.http.Client.ConnectionPool{};
     while (true) {
-        var arena_alloc = std.heap.ArenaAllocator.init(allocator);
+        // Most processing is fairly small
+        var stack_fallback_allocator = std.heap.stackFallback(1024 * 2, allocator);
+        var arena_alloc = std.heap.ArenaAllocator.init(stack_fallback_allocator.get());
         defer arena_alloc.deinit();
         const arena = arena_alloc.allocator();
 
@@ -112,7 +114,7 @@ pub fn main() !u8 {
                         .{ event.folder, event.action, event.event_type, event.path },
                     );
                     std.log.debug("Executing command \n\t{s}", .{watcher.command});
-                    try lib.executeCommand(allocator, watcher.command, event);
+                    try lib.executeCommand(arena, watcher.command, event);
                 }
             }
         }
