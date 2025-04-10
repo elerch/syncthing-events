@@ -80,6 +80,7 @@ pub const SyncthingEvent = struct {
 
     pub fn deinit(self: *SyncthingEvent, allocator: std.mem.Allocator) void {
         allocator.free(self.data_type);
+        allocator.free(self.event_type);
         allocator.free(self.time);
         allocator.free(self.folder);
         allocator.free(self.action);
@@ -339,6 +340,8 @@ test "command variable expansion" {
         .path = "vacation.jpg",
         .action = "update",
         .time = "2025-04-01T11:43:51.586762264-07:00",
+        .event_type = "ItemFinished",
+        .original_json = "{}",
     };
 
     const command = "convert ${path} -resize 800x600 thumb_${folder}_${id}.jpg";
@@ -359,11 +362,29 @@ test "watcher pattern matching" {
         .action = "update",
     };
 
-    try std.testing.expect(watcher.matches(.{ .folder = "photos", .path = "test.jpg", .data_type = "update", .event_type = "ItemFinished" }));
-    try std.testing.expect(watcher.matches(.{ .folder = "photos", .path = "test.jpeg", .data_type = "update", .event_type = "ItemFinished" }));
-    try std.testing.expect(watcher.matches(.{ .folder = "photos", .path = "test.png", .data_type = "update", .event_type = "ItemFinished" }));
-    try std.testing.expect(watcher.matches(.{ .folder = "documents", .path = "test.jpg", .data_type = "update", .event_type = "ItemFinished" }));
-    try std.testing.expect(watcher.matches(.{ .folder = "photos", .path = "test.jpeg", .data_type = "delete", .event_type = "ItemFinished" }));
+    var event = SyncthingEvent{
+        .id = 442,
+        .action = "update",
+        .folder = "photos",
+        .path = "test.jpg",
+        .data_type = "update",
+        .event_type = "ItemFinished",
+        .original_json = "{}",
+        .time = "2025-04-01T11:43:51.586762264-07:00",
+    };
+
+    try std.testing.expect(watcher.matches(event));
+    event.path = "test.jpeg";
+    try std.testing.expect(watcher.matches(event));
+    event.path = "test.png";
+    try std.testing.expect(!watcher.matches(event));
+    event.path = "test.jpg";
+    event.folder = "documents";
+    try std.testing.expect(!watcher.matches(event));
+    event.path = "test.jpeg";
+    event.folder = "photos";
+    event.action = "delete";
+    try std.testing.expect(!watcher.matches(event));
 }
 
 test "end to end config / event" {
