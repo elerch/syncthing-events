@@ -24,7 +24,7 @@ jobs:
       - name: Publish build
         run: |
           curl --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} \
-            --upload-file ${{ runner.temp }}/zig-out/bin/syncthing_events \
+            --upload-file zig-out/bin/syncthing_events \
             https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/syncthing_events-x86_64-linux-${{ github.sha }}
       - name: Notify
         uses: elerch/action-notify-ntfy@v2.github
