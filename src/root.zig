@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const mvzr = @import("mvzr");
 const zeit = @import("zeit");
@@ -355,6 +356,9 @@ test "command variable expansion" {
 }
 
 test "watcher pattern matching" {
+    // https://github.com/mnemnion/mvzr/issues/7
+    if (builtin.mode != .Debug)
+        return error.SkipZigTest;
     var watcher = Watcher{
         .folder = "photos",
         .path_pattern = ".*\\.jpe?g$",
@@ -388,6 +392,9 @@ test "watcher pattern matching" {
 }
 
 test "end to end config / event" {
+    // https://github.com/mnemnion/mvzr/issues/7
+    if (builtin.mode != .Debug)
+        return error.SkipZigTest;
     const config_json =
         \\{
         \\  "syncthing_url": "http://test:8384",
