@@ -12,7 +12,7 @@ jobs:
       - uses: mlugg/setup-zig@v1.2.1
         with:
           version: 0.14.0
-      - uses: elerch/zig-action-cache@v1.1.6
+      - uses: https://github.com/elerch/zig-action-cache@v1.1.6
       - name: Build project
         run: zig build --summary all
       - name: Run tests
@@ -62,7 +62,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           annotations: ${{ steps.meta.outputs.annotations }}
       - name: Notify
-        uses: elerch/action-notify-ntfy@v2.github
+        uses: https://github.com/elerch/action-notify-ntfy@v2.github
         if: always() && env.GITEA_ACTIONS == 'true'
         with:
           host: ${{ secrets.NTFY_HOST }}
