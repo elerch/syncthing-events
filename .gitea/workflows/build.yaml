@@ -34,7 +34,7 @@ jobs:
         with:
           # list of Docker images to use as base name for tags
           images: |
-            git.lerch.org/&{{ github.repository }}
+            git.lerch.org/${{ github.repository }}
           # generate Docker tags based on the following events/attributes
           tags: |
             type=schedule
