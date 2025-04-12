@@ -26,6 +26,41 @@ jobs:
           curl --user ${{ github.actor }}:${{ secrets.PACKAGE_PUSH }} \
             --upload-file zig-out/bin/syncthing_events \
             https://git.lerch.org/api/packages/lobo/generic/aws-sdk-with-models/${{ github.sha }}/syncthing_events-x86_64-linux-${{ github.sha }}
+      - name: Prepare docker image
+        run: zig build docker
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # list of Docker images to use as base name for tags
+          images: |
+            git.lerch.org/&{{ github.repository }}
+          # generate Docker tags based on the following events/attributes
+          tags: |
+            type=schedule
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to Gitea Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: git.lerch.org
+          username: ${{ github.actor }}
+          password: ${{ secrets.PACKAGE_PUSH }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: zig-out
+          platforms: linux/amd64,linux/arm64,linux/riscv64,linux/ppc64le,linux/s390x,linux/386,linux/arm/v7,linux/arm/v6
+          # load: true # will not work for multiplatform
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          annotations: ${{ steps.meta.outputs.annotations }}
       - name: Notify
         uses: elerch/action-notify-ntfy@v2.github
         if: always() && env.GITEA_ACTIONS == 'true'
