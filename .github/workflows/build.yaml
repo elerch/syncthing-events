@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: elerch/setup-zig@v3
+      - uses: mlugg/setup-zig@v1.2.1
         with:
           version: 0.14.0
       - uses: elerch/zig-action-cache@v1.1.6
