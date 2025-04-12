@@ -142,7 +142,7 @@ fn docker(b: *std.Build, compile: *std.Build.Step.Compile) !void {
         .{ .platform = "linux/arm64", .target = .{ .cpu_arch = .aarch64, .os_tag = .linux } },
         .{ .platform = "linux/riscv64", .target = .{ .cpu_arch = .riscv64, .os_tag = .linux } },
         .{ .platform = "linux/ppc64le", .target = .{ .cpu_arch = .powerpc64le, .os_tag = .linux } },
-        .{ .platform = "linux/390x", .target = .{ .cpu_arch = .s390x, .os_tag = .linux } },
+        .{ .platform = "linux/s390x", .target = .{ .cpu_arch = .s390x, .os_tag = .linux } },
         .{ .platform = "linux/386", .target = .{ .cpu_arch = .x86, .os_tag = .linux } },
         .{ .platform = "linux/arm/v7", .target = .{ .cpu_arch = .arm, .os_tag = .linux, .abi = .musleabihf } }, // linux/arm/v7
         .{ .platform = "linux/arm/v6", .target = .{
@@ -214,7 +214,7 @@ fn docker(b: *std.Build, compile: *std.Build.Step.Compile) !void {
 
 fn dockerInstallDockerfile(b: *std.Build, docker_step: *std.Build.Step, exe_name: []const u8) !void {
     const dockerfile_fmt =
-        \\FROM alpine:latest as build
+        \\FROM alpine:latest AS build
         \\RUN apk --update add ca-certificates
         \\
         \\FROM scratch
