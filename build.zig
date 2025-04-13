@@ -221,7 +221,7 @@ fn dockerInstallDockerfile(b: *std.Build, docker_step: *std.Build.Step, exe_name
         \\ARG TARGETPLATFORM
         \\ENV PATH=/bin
         \\COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-        \\COPY bin/$TARGETPLATFORM/{s} /bin
+        \\COPY bin/$TARGETPLATFORM/{s} /bin/
         \\ENTRYPOINT ["/bin/{s}"]
     ;
     const dockerfile_data = try std.fmt.allocPrint(
