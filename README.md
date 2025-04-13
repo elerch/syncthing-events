@@ -17,6 +17,8 @@ zig build
 
 The executable will be created in `zig-out/bin/syncthing_events`
 
+Docker images are available at: https://git.lerch.org/lobo/syncthing-events/packages
+
 ## Configuration
 
 Create a configuration file in either JSON, ZON, or YAML format. Example (in JSON):
