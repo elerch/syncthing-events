@@ -14,8 +14,8 @@ jobs:
         uses: https://github.com/mlugg/setup-zig@v1.2.1
         with:
           version: 0.14.0
-      - name: Restore Zig global cache
-        uses: https://github.com/elerch/zig-action-cache@v1.1.6
+      - name: Restore Zig caches
+        uses: https://github.com/Hanaasagi/zig-action-cache@3954aae427f8b05914e08dfd79f15e1f2e435929
       - name: Build project
         run: zig build --summary all
       - name: Run tests
